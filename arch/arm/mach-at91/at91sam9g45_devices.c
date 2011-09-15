@@ -18,6 +18,7 @@
 #include <mach/board.h>
 #include <mach/gpio.h>
 #include <mach/io.h>
+#include <linux/mtd/nand.h>
 
 #include "generic.h"
 
