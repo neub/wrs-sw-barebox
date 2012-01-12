@@ -1,37 +1,10 @@
 #!/bin/sh
-
-# use 'dhcp' to do dhcp in barebox and in kernel
-# use 'none' if you want to skip kernel ip autoconfiguration
-ip=dhcp
-
-# or set your networking parameters here
-#eth0.ipaddr=a.b.c.d
-#eth0.netmask=a.b.c.d
-#eth0.gateway=a.b.c.d
-#eth0.serverip=a.b.c.d
-
-# can be either 'nfs', 'tftp' or 'nand'
-kernel_loc=nand
-# can be either 'net', 'nand' or 'initrd'
-rootfs_loc=nand
-
-# can be either 'jffs2' or 'ubifs'
-rootfs_type=ubifs
-rootfsimage=root.$rootfs_type
-
-#kernelimage=zImage
-kernelimage=uImage
-#kernelimage=Image
-#kernelimage=Image.lzo
-
-nand_device=atmel_nand
-nand_parts="128k(bootstrap)ro,256k(barebox)ro,1664k(bareboxenv),3M(kernel),-(root)"
-rootfs_mtdblock_nand=4
-
+eth0.ethaddr=02:0B:AD:C0:FF:EE
 autoboot_timeout=3
-
+PS1="barebox-wrs> "
 bootargs="console=ttyS0,115200"
-
-# set a fancy prompt (if support is compiled in)
-PS1="\e[1;32mbarebox@\e[1;31m\h:\w\e[0m "
-
+timeout -a $autoboot_timeout
+if [ $? != 0 ]; then exit; fi
+dhcp
+tftp wrboot
+./wrboot
