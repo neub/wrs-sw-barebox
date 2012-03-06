@@ -44,9 +44,9 @@ static struct atmel_nand_data nand_pdata = {
 	.ale		= 21,
 	.cle		= 22,
 /*	.det_pin	= ... not connected */
-	.rdy_pin	= AT91_PIN_PD3,
+	.rdy_pin	= AT91_PIN_PC8,
 	.enable_pin	= AT91_PIN_PC14,
-	.bus_width_16	= 0,
+	.bus_width_16	= 1,
 };
 
 static struct sam9_smc_config pm_nand_smc_config = {
@@ -69,7 +69,7 @@ static struct sam9_smc_config pm_nand_smc_config = {
 
 static void pm_add_device_nand(void)
 {
-	pm_nand_smc_config.mode |= AT91_SMC_DBW_8;
+	pm_nand_smc_config.mode |= AT91_SMC_DBW_16;
 
 	/* configure chip-select 3 (NAND) */
 	sam9_smc_configure(3, &pm_nand_smc_config);
