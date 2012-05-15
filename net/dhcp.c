@@ -607,6 +607,7 @@ static void dhcp_reset_env(void)
 static int do_dhcp(int argc, char *argv[])
 {
 	int ret, opt;
+	int retries=-1;
 
 	dhcp_reset_env();
 
@@ -627,6 +628,7 @@ static int do_dhcp(int argc, char *argv[])
 		}
 	}
 
+
 	dhcp_con = net_udp_new(0xffffffff, PORT_BOOTPS, dhcp_handler, NULL);
 	if (IS_ERR(dhcp_con)) {
 		ret = PTR_ERR(dhcp_con);
@@ -643,14 +645,25 @@ static int do_dhcp(int argc, char *argv[])
 	if (ret)
 		goto out1;
 
+	if(argc >= 2)
+		retries = simple_strtoul(argv[1], NULL, 10);
+
 	while (dhcp_state != BOUND) {
 		if (ctrlc())
 			break;
+		if (!retries) 
+		{
+			ret = ETIMEDOUT;
+			goto out1;
+		}
+		
 		net_poll();
 		if (is_timeout(dhcp_start, 3 * SECOND)) {
 			dhcp_start = get_time_ns();
 			printf("T ");
 			ret = bootp_request();
+			if(retries > 0)
+				retries--;
 			if (ret)
 				goto out1;
 		}
