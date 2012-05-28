@@ -40,6 +40,25 @@
 #include <mach/at91sam9_smc.h>
 #include <mach/sam9_smc.h>
 
+/*
+ * board revision encoding
+ *  V3.1 => by default: PA4 is 1 & PC7 is 0.
+ *  V3.2 => by default: PA4 is 0 & PC7 is 1 
+ */
+static void wrs3_check_gpios(void)
+{
+	if (!gpio_request(AT91_PIN_PA4, "") &&
+		!gpio_request(AT91_PIN_PC7, ""))
+	{
+		printf("GPIOs: PA4=%d (%d), PC7=%d (%d)\n",
+			gpio_get_value(AT91_PIN_PA4),AT91_PIN_PA4,gpio_get_value(AT91_PIN_PC7),AT91_PIN_PC7);
+	} 
+	else 
+	{
+		printf("Error: unable to acquire board GPIOs\n");
+	}	
+}
+
 static struct atmel_nand_data nand_pdata = {
 	.ale		= 21,
 	.cle		= 22,
@@ -148,6 +167,8 @@ static int pm9g45_devices_init(void)
 
 	armlinux_set_bootparams((void *)(AT91_CHIPSELECT_6 + 0x100));
 	armlinux_set_architecture(MACH_TYPE_PM9G45);
+	
+	wrs3_check_gpios();
 
 	return 0;
 }
