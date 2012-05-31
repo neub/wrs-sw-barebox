@@ -1,10 +1,7 @@
 #!/bin/sh
 eth0.ethaddr=02:0B:AD:C0:FF:EE
-autoboot_timeout=3
-PS1="barebox-wrs> "
-bootargs="console=ttyS0,115200"
-timeout -a $autoboot_timeout
-if [ $? != 0 ]; then exit; fi
-dhcp
-tftp wrboot
-./wrboot
+autoboot_timeout="10";
+#autoboot_altforced="0";
+#autoboot_altmode="2";
+#error_timeout="10";
+PS1="wrs-$eth0.ethaddr# "
