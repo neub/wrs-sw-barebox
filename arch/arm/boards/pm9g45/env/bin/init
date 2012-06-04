@@ -11,10 +11,8 @@
 #	- 	ip: dhcp or none (in this case setup by eth0) 
 #######################################
 
-
 echo ""
 echo "=============================================="
-echo "Starting up barebox [wrs3] (MAC=$eth0.ethaddr)"
 
 ### Default value
 autoboot_timeout="10";
@@ -25,16 +23,23 @@ PS1="wrs-$eth0.ethaddr# "
 
 ### Override default value using /env/config
 . /env/config
+echo "Starting up barebox [wrs3] (MAC=$eth0.ethaddr)"
+
 
 ### Generic setup
 PATH=/env/bin
 export PATH
 
 if [ x$autoboot_timeout != x ]; then menu_timeout="-A $autoboot_timeout"; fi
-if [ -f /dev/mem.kernel ]; then; else addpart /dev/mem  0x400000@0x71000000(kernel); fi
+
 gpio_set_value 33 0 #Set 2nd LED ON (PA2)
 mode=""
+ok="0"
 
+### Creating the partitions:
+if [ -e /dev/mem.kernel ]; then; 	else addpart /dev/mem  8M@0x71000000(kernel); fi
+if [ -e /dev/nand0.kernel ]; then; else addpart /dev/nand0 256k@0x4000(bareboxenv),8M@0x100000(kernel),-@0x4000000(rootfs); fi
+if [ -e /dev/nand0.kernel.bb ]; then; else nand -a /dev/nand0.*; fi
 
 ### Create the menu for various boot in case we don't run the autoboot
 menu -r -m boot
@@ -45,6 +50,7 @@ menu -e -a -m boot -c 'init -m script -i dhcp'				-d "boot from script"
 menu -e -a -m boot -c 'init -m tftp -r tftp -i dhcp'		-d "boot from tftp"
 menu -e -a -m boot -c 'init -m tftp -r nfs -i dhcp'			-d "boot from nfs"
 menu -e -a -m boot -c 'init -m tftp -r nfs -i dhcp -x test'	-d "boot from nfs (test)"
+menu -e -a -m boot -c 'init -m config'						-d "edit & save config"
 menu -e -a -m boot -c 'exit 0'								-d "shell (prompt terminal)"
 menu -e -a -m boot -c reset									-d "reset barebox"
 
@@ -70,14 +76,13 @@ if [ x$mode = x ]; then ### Check if an alternative mode is on or off
 	
 	gpio_get_value 36 #Obtain value of FPGA button (PA4)
 	if [ "$?" -eq "0" ]; then
-		autoboot_altforced = "1"; #Force alternative boot if FGPA button is pushed
+		autoboot_altforced="1"; #Force alternative boot if FGPA button is pushed
 	fi 
 	
 	## Check if there is an alternative boot
 	if [ "$autoboot_altforced" -eq "1" ]; then
-		menu -m boot -S -n $autoboot_altmode
-		menu -s -m boot $menu_timeout
-		exit 0; 		
+		menu -m boot -S -n $autoboot_altmode;
+		ok="1";
 	else
 		## Otherwise boot from NAND
 		mode="nand"; 
@@ -93,27 +98,32 @@ if [ x$mode = xnand ]; then
 	echo "booting from NAND"
 	### If barebox is not already set in NAND (first boot or NAND formatted)
 	if [ -f /env/this_is_compiled_in ]; then
-       echo "No NAND environment: saving default one"
-       rm /env/this_is_compiled_in
-       saveenv
-       menu -s -m boot $menu_timeout -b "boot from nfs (test)" 
-       exit 0;
+		echo "You might save & edit the config to run from NAND"
+		menu -m boot -S -n 6	#Select automatic NFS (test) option for next boot
+		ok="1"
     else
-		if [ -f /dev/nand_kernel ]; then
-			cp /dev/nand_kernel /dev/mem.kernel
-			bootargs="$bootargs root=1f01 rootfstype=jffs2 mem=32m init=/init"
-			bootz /dev/mem.kernel
-		else 
-			echo "/dev/nand_kernel does not exist"
-		fi
-		echo "Error: Loading kernel from NAND, trying: $autoboot_altmode"
-		echo -n "hit any key to go to menu..."; timeout -sa $error_timeout
-		menu -m boot -S -n $autoboot_altmode
-		menu -m boot -s $menu_timeout
-		exit 0; 
-    fi
+		cp /dev/nand0.kernel /dev/mem.kernel
+		bootargs="$bootargs root=1f01 rootfstype=jffs2 mem=32m init=/init"
+		bootz /dev/mem.kernel
+		menu -m boot -S -n $autoboot_altmode #Select the alternative boot
+	fi
     
 fi
+
+### Edit and save config mode
+if [ x$mode = xconfig ]; then
+
+	edit 	/env/config
+	.	/env/config
+	saveenv 	/env/* /dev/env0
+
+	if [ -f /env/this_is_compiled_in ]; then
+	   echo "No NAND environment..."
+	   rm /env/this_is_compiled_in
+	fi
+	ok="1"
+fi
+
 
 ### Try failsafe boot from DF
 if [ x$mode = xdf ]; then
@@ -140,7 +150,7 @@ if [ x$mode = xscript ]; then
 		echo "We have got a custom boot file for this particular switch."
 		./customboot
 		
-	### Load Kernel from TFTP and mount NFS
+	### Load generic script
 	else
 		tftp wrboot
 		if [ "$?" -eq "0" ]; then
@@ -154,26 +164,31 @@ if [ x$mode = xtftp ]; then
 
 	#loading the kernel
 	tftp zImage-usb /dev/mem.kernel
-	bootargs="$bootargs ip=${eth0.ipaddr}:${eth0.gateway}:${eth0.netmask}:${eth0.gateway}"
 	if [ x$rootfs_loc = xnfs ]; then
+		bootargs="$bootargs ip=${eth0.ipaddr}:${eth0.gateway}:${eth0.netmask}:${eth0.gateway}"
 		bootargs="$bootargs root=/dev/nfs nfsroot=/tftpboot/rootfs${xtra},tcp mem=32m"
 		bootz /dev/mem.kernel
 	elif [ x$rootfs_loc = xtftp ]; then
-		addpart /dev/mem  0x400000@0x72000000(fs)
-		tftp wrs-image.cpio.gz /dev/mem.fs ##TODO: Improve loading using a the wrs-image.cpio.gz
-		bootargs="$bootargs initrd=0x72000000,3439911"
+		addpart /dev/mem  8M@0x72000000(fs)
+		tftp wrs-image.cpio.gz /dev/mem.fs 
+		bootargs="$bootargs initrd=0x72000000,8388608"
 		bootz /dev/mem.kernel
 	else
 		echo "not implemented"
 	fi
-	
 fi
 
+
+
 ### Error message and go back to the menu
-echo "Error: Loading kernel+FS from $mode!"
-echo -n "hit any key to go to menu..."; timeout -sa $error_timeout
-menu -m boot -s
-exit 0;
+if [ "$ok" -eq "0" ]; then 
+	echo "Error: Loading kernel+FS from $mode!"
+	echo -n "hit any key to go to menu..."; timeout -a $error_timeout
+	menu_timeout=""
+fi
+menu -s boot $menu_timeout
+exit 0
+
  
 
 
