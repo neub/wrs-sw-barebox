@@ -147,6 +147,13 @@ void start_barebox (void)
 		run_command("source /env/bin/init", 0);
 	} else {
 		printf("not found\n");
+		if (stat("/env/", &s)) {
+			printf("Error loading  %s. "
+			"Using default environment\n",
+			default_environment_path);
+			envfs_load("/dev/defaultenv", "/env");
+			run_command("source /env/bin/init", 0);
+		}
 	}
 #endif
 	/* main_loop() can return to retry autoboot, if so just run it again. */
