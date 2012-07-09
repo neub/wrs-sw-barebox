@@ -14,12 +14,13 @@
 echo ""
 echo "=============================================="
 
-### Default value
+### Default value ": ${VISUAL:=vi}"
 autoboot_timeout="10";
 autoboot_altforced="0";
 autoboot_altmode="2";
 error_timeout="60";
-PS1="wrs-$eth0.ethaddr# "
+
+bootargs="console=ttyS0,115200"
 
 ### Override default value using /env/config
 . /env/config
@@ -33,8 +34,10 @@ export PATH
 if [ x$autoboot_timeout != x ]; then menu_timeout="-A $autoboot_timeout"; fi
 
 gpio_set_value 33 0 #Set 2nd LED ON (PA2)
+PS1="wrs-$eth0.ethaddr# "
 mode=""
 ok="0"
+run="1"
 
 ### Creating the partitions:
 if [ -e /dev/mem.kernel ]; then; 	else addpart /dev/mem  8M@0x71000000(kernel); fi
@@ -47,7 +50,7 @@ menu -a -m boot -d "Welcome on WRSv3 Boot Sequence"
 menu -e -a -m boot -c 'init -m nand'						-d "boot from nand (default)"
 menu -e -a -m boot -c 'init -m df'							-d "boot from dataflash (failsafe)"
 menu -e -a -m boot -c 'init -m script -i dhcp'				-d "boot from script"
-menu -e -a -m boot -c 'init -m tftp -r tftp -i dhcp'		-d "boot from tftp"
+menu -e -a -m boot -c 'init -m ram -r tftp -i dhcp'			-d "boot from ram"
 menu -e -a -m boot -c 'init -m tftp -r nfs -i dhcp'			-d "boot from nfs"
 menu -e -a -m boot -c 'init -m tftp -r nfs -i dhcp -x test'	-d "boot from nfs (test)"
 menu -e -a -m boot -c 'init -m config'						-d "edit & save config"
@@ -72,30 +75,36 @@ done
 
 
 ### In case mode is not set
-if [ x$mode = x ]; then ### Check if an alternative mode is on or off
+if [ x$run = x1 -a x$mode = x ]; then ### Check if an alternative mode is on or off
+	run="0"
 	
-	gpio_get_value 36 #Obtain value of FPGA button (PA4)
+	gpio_get_value 103 #Obtain value of alternative boot jumper (only for v3.2+)
 	if [ "$?" -eq "0" ]; then
-		autoboot_altforced="1"; #Force alternative boot if FGPA button is pushed
+		autoboot_altforced="1" #Force alternative boot if FGPA button is pushed
 	fi 
 	
 	## Check if there is an alternative boot
 	if [ "$autoboot_altforced" -eq "1" ]; then
-		menu -m boot -S -n $autoboot_altmode;
-		ok="1";
+		menu -m boot -S -n $autoboot_altmode
+		ok="1"
 	else
 		## Otherwise boot from NAND
-		mode="nand"; 
+		menu -m boot -S -n 1
+		ok="1"
 	fi
-	
-	
 fi
 
 ################################# Boot modes
 
+
+
+
+
 ### Try booting from NAND (default mode)
-if [ x$mode = xnand ]; then
+if [ x$run = x1 -a x$mode = xnand ]; then
 	echo "booting from NAND"
+	run="0"
+	
 	### If barebox is not already set in NAND (first boot or NAND formatted)
 	if [ -f /env/this_is_compiled_in ]; then
 		echo "You might save & edit the config to run from NAND"
@@ -111,27 +120,49 @@ if [ x$mode = xnand ]; then
 fi
 
 ### Edit and save config mode
-if [ x$mode = xconfig ]; then
+if [ x$run = x1 -a x$mode = xconfig ]; then
+	echo "Editing config..."
+	run="0"
 
-	edit 	/env/config
+	edit /env/config
 	.	/env/config
-	saveenv 	/env/* /dev/env0
-
 	if [ -f /env/this_is_compiled_in ]; then
 	   echo "No NAND environment..."
 	   rm /env/this_is_compiled_in
 	fi
+	saveenv 
 	ok="1"
 fi
 
 
 ### Try failsafe boot from DF
-if [ x$mode = xdf ]; then
+if [ x$run = x1 -a x$mode = xdf ]; then
+	run="0"
+	
 	echo "not implemented"
 fi
 
+
+### Try booting from RAM
+if [ x$run = x1 -a x$mode = xram ]; then
+	echo "booting from RAM"
+	run="0"
+	
+	echo "Kernel+FS must have been set using usb-loader"	
+	addpart /dev/mem  8M@0x72000000(fs)
+	bootargs="$bootargs initrd=0x72000000,8388608"
+	bootz /dev/mem.kernel
+	
+	## Otherwise try to load from TFTP
+	run="1"
+	ip=dhcp
+	mode=tftp
+	rootfs_loc=tftp
+fi
+
+
 ### Obtain DHCP
-if [ x$ip = xdhcp ]; then
+if [ x$run = x1 -a x$ip = xdhcp ]; then
 	dhcp 5
 	if [ "$?" -eq "1" ]; then
 			echo "Enable to obtain IP from DHCP"
@@ -142,8 +173,10 @@ if [ x$ip = xdhcp ]; then
 fi
 
 ### Try autoboot from loading script  
-if [ x$mode = xscript ]; then
-
+if [ x$run = x1 -a x$mode = xscript ]; then
+	echo "booting from Script"
+	run="0"	
+	
 	### Search customboot based on MAC address
 	tftp $eth0.ethaddr/wrboot /customboot
 	if [ "$?" -eq "0" ]; then
@@ -160,10 +193,12 @@ if [ x$mode = xscript ]; then
 fi
 
 ### Try booting from TFTP 
-if [ x$mode = xtftp ]; then
-
+if [ x$run = x1 -a x$mode = xtftp ]; then
+	echo "booting from TFTP"
+	run="0"
+	
 	#loading the kernel
-	tftp zImage-usb /dev/mem.kernel
+	tftp zImage /dev/mem.kernel
 	if [ x$rootfs_loc = xnfs ]; then
 		bootargs="$bootargs ip=${eth0.ipaddr}:${eth0.gateway}:${eth0.netmask}:${eth0.gateway}"
 		bootargs="$bootargs root=/dev/nfs nfsroot=/tftpboot/rootfs${xtra},tcp mem=32m"
