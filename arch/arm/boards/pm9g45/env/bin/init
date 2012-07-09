@@ -1,0 +1,228 @@
+#!/bin/sh
+#
+# Init script for WRS barebox
+# ========================
+# Syntax: Hush shell script
+# Authors: Benoit Rat, Tomasz Wlostowski
+# Environment variables:
+#	-	autoboot_timeout: number of seconds
+#	-	autoboot_altforced: "1" or "0"
+#	-	default_altmode: i.e "the menu number"
+#	- 	ip: dhcp or none (in this case setup by eth0) 
+#######################################
+
+echo ""
+echo "=============================================="
+
+### Default value ": ${VISUAL:=vi}"
+autoboot_timeout="10";
+autoboot_altforced="0";
+autoboot_altmode="2";
+error_timeout="60";
+net="0"
+bootargs="console=ttyS0,115200"
+
+### Override default value using /env/config
+. /env/config
+echo "Starting up barebox [wrs3] (MAC=$eth0.ethaddr)"
+
+
+### Generic setup
+PATH=/env/bin
+export PATH
+
+if [ x$autoboot_timeout != x ]; then menu_timeout="-A $autoboot_timeout"; fi
+
+gpio_set_value 33 0 #Set 2nd LED ON (PA2)
+PS1="wrs-$eth0.ethaddr# "
+mode=""
+ok="0"
+run="1"
+
+### Creating the partitions:
+if [ -e /dev/mem.kernel ]; then; 	else addpart /dev/mem  8M@0x71000000(kernel); fi
+if [ -e /dev/nand0.kernel ]; then; else addpart /dev/nand0 256k@0x4000(bareboxenv),8M@0x100000(kernel),-@0x4000000(rootfs); fi
+if [ -e /dev/nand0.kernel.bb ]; then; else nand -a /dev/nand0.*; fi
+
+### Create the menu for various boot in case we don't run the autoboot
+menu -r -m boot
+menu -a -m boot -d "Welcome on WRSv3 Boot Sequence"
+menu -e -a -m boot -c 'init -m nand'						-d "boot from nand (default)"
+menu -e -a -m boot -c 'init -m df'							-d "boot from dataflash (failsafe)"
+menu -e -a -m boot -c 'init -m script -n'					-d "boot from script"
+menu -e -a -m boot -c 'init -m ram -r tftp -n'				-d "boot from ram"
+menu -e -a -m boot -c 'init -m tftp -r nfs -n'				-d "boot from nfs"
+menu -e -a -m boot -c 'init -m tftp -r nfs -n -x test'		-d "boot from nfs (test)"
+menu -e -a -m boot -c 'init -m config'						-d "edit & save config"
+menu -e -a -m boot -c 'exit 0'								-d "shell (prompt terminal)"
+menu -e -a -m boot -c reset									-d "reset barebox"
+
+### Check init arguments
+while getopt "m:r:x:n" Option
+do
+if [ ${Option} = m ]; then
+	mode=${OPTARG}
+elif [ ${Option} = r ]; then
+	rootfs_loc=${OPTARG}
+elif [ ${Option} = n ]; then
+	net="1"
+elif [ ${Option} = x ]; then
+	xtra="-${OPTARG}"
+else
+fi
+done
+
+
+### In case mode is not set
+if [ x$run = x1 -a x$mode = x ]; then ### Check if an alternative mode is on or off
+	run="0"
+	
+	gpio_get_value 103 #Obtain value of alternative boot jumper (only for v3.2+)
+	if [ "$?" -eq "0" ]; then
+		autoboot_altforced="1" #Force alternative boot if FGPA button is pushed
+	fi 
+	
+	## Check if there is an alternative boot
+	if [ "$autoboot_altforced" -eq "1" ]; then
+		menu -m boot -S -n $autoboot_altmode
+		ok="1"
+	else
+		### If barebox is not already set in NAND (first boot or NAND formatted)
+		if [ -f /env/this_is_compiled_in ]; then
+			echo "You might save & edit the config to run from NAND"
+			menu -m boot -S -n 6	#Select automatic NFS (test) option for next boot
+			ok="1"
+		### Otherwise boot from NAND	
+	    else
+			menu -m boot -S -n 1
+			ok="1"
+		fi
+	fi
+fi
+
+################################# Boot modes
+
+
+
+
+
+### Try booting from NAND (default mode)
+if [ x$run = x1 -a x$mode = xnand ]; then
+	echo "booting from NAND"
+	run="0"
+		
+	cp /dev/nand0.kernel /dev/mem.kernel
+	bootargs="$bootargs root=1f01 rootfstype=jffs2 mem=32m init=/init"
+	bootz /dev/mem.kernel
+	menu -m boot -S -n $autoboot_altmode #Select the alternative boot
+fi
+
+### Edit and save config mode
+if [ x$run = x1 -a x$mode = xconfig ]; then
+	echo "Editing config..."
+	run="0"
+
+	edit /env/config
+	.	/env/config
+	if [ -f /env/this_is_compiled_in ]; then
+	   echo "No NAND environment..."
+	   rm /env/this_is_compiled_in
+	fi
+	saveenv 
+	ok="1"
+fi
+
+
+### Try failsafe boot from DF
+if [ x$run = x1 -a x$mode = xdf ]; then
+	run="0"
+	
+	echo "not implemented"
+fi
+
+
+### Try booting from RAM
+if [ x$run = x1 -a x$mode = xram ]; then
+	echo "booting from RAM"
+	run="0"
+	
+	echo "Kernel+FS must have been set using usb-loader"	
+	addpart /dev/mem  8M@0x72000000(fs)
+	bootargs="$bootargs initrd=0x72000000,8388608"
+	bootz /dev/mem.kernel
+	
+	## Otherwise try to load from TFTP
+	run="1"
+	ip=dhcp
+	mode=tftp
+	rootfs_loc=tftp
+fi
+
+
+### Obtain DHCP
+if [ x$run = x1 -a x$net = x1 -a x$ip = xdhcp ]; then
+	dhcp 5
+	if [ "$?" -eq "1" ]; then
+			echo "Enable to obtain IP from DHCP (Required for $mode)"
+			run="0"
+			ok="0"
+	fi
+	
+fi
+
+### Try autoboot from loading script  
+if [ x$run = x1 -a x$mode = xscript ]; then
+	echo "booting from Script"
+	run="0"	
+	
+	### Search customboot based on MAC address
+	tftp $eth0.ethaddr/wrboot /customboot
+	if [ "$?" -eq "0" ]; then
+		echo "We have got a custom boot file for this particular switch."
+		./customboot
+		
+	### Load generic script
+	else
+		tftp wrboot
+		if [ "$?" -eq "0" ]; then
+			./wrboot
+		fi
+	fi
+fi
+
+### Try booting from TFTP 
+if [ x$run = x1 -a x$mode = xtftp ]; then
+	echo "booting from TFTP"
+	run="0"
+	
+	#loading the kernel
+	tftp zImage /dev/mem.kernel
+	if [ x$rootfs_loc = xnfs ]; then
+		bootargs="$bootargs ip=${eth0.ipaddr}:${eth0.gateway}:${eth0.netmask}:${eth0.gateway}"
+		bootargs="$bootargs root=/dev/nfs nfsroot=/tftpboot/rootfs${xtra},tcp mem=32m"
+		bootz /dev/mem.kernel
+	elif [ x$rootfs_loc = xtftp ]; then
+		addpart /dev/mem  8M@0x72000000(fs)
+		tftp wrs-image.cpio.gz /dev/mem.fs 
+		bootargs="$bootargs initrd=0x72000000,8388608"
+		bootz /dev/mem.kernel
+	else
+		echo "not implemented"
+	fi
+fi
+
+
+
+### Error message and go back to the menu
+if [ "$ok" -eq "0" ]; then 
+	echo "Error: Loading kernel+FS from $mode!"
+	echo -n "hit any key to go to menu..."; timeout -a $error_timeout
+	menu_timeout=""
+fi
+menu -s boot $menu_timeout
+exit 0
+
+ 
+
+
+

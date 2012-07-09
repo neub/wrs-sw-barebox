@@ -1,37 +1,27 @@
 #!/bin/sh
+## You must use Ctrl+D to Save & Ctrl+C to Exit
 
-# use 'dhcp' to do dhcp in barebox and in kernel
-# use 'none' if you want to skip kernel ip autoconfiguration
+
+##eth0.ethaddr corresponds to the MAC address of the switch, it can also be changes using flasher
+eth0.ethaddr=02:0B:AD:C0:FF:EE
+
+## use 'dhcp' to do dhcp in barebox and in kernel
 ip=dhcp
 
-# or set your networking parameters here
+## or set your networking parameters here
+#eth0.serverip=a.b.c.d
 #eth0.ipaddr=a.b.c.d
 #eth0.netmask=a.b.c.d
 #eth0.gateway=a.b.c.d
-#eth0.serverip=a.b.c.d
 
-# can be either 'nfs', 'tftp' or 'nand'
-kernel_loc=nand
-# can be either 'net', 'nand' or 'initrd'
-rootfs_loc=nand
+## Timeout to autoboot in the pre-selected menu
+autoboot_timeout="10";
 
-# can be either 'jffs2' or 'ubifs'
-rootfs_type=ubifs
-rootfsimage=root.$rootfs_type
+## In case the default boot doesn't work we can use a specified alternative boot
+#autoboot_altforced="0";
+#autoboot_altmode="2";
 
-#kernelimage=zImage
-kernelimage=uImage
-#kernelimage=Image
-#kernelimage=Image.lzo
+## Timeout to show the error Message
+#error_timeout="10";
 
-nand_device=atmel_nand
-nand_parts="128k(bootstrap)ro,256k(barebox)ro,1664k(bareboxenv),3M(kernel),-(root)"
-rootfs_mtdblock_nand=4
-
-autoboot_timeout=3
-
-bootargs="console=ttyS0,115200"
-
-# set a fancy prompt (if support is compiled in)
-PS1="\e[1;32mbarebox@\e[1;31m\h:\w\e[0m "
 
