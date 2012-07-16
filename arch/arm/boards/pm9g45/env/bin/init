@@ -88,9 +88,16 @@ if [ x$run = x1 -a x$mode = x ]; then ### Check if an alternative mode is on or 
 		menu -m boot -S -n $autoboot_altmode
 		ok="1"
 	else
-		## Otherwise boot from NAND
-		menu -m boot -S -n 1
-		ok="1"
+		### If barebox is not already set in NAND (first boot or NAND formatted)
+		if [ -f /env/this_is_compiled_in ]; then
+			echo "You might save & edit the config to run from NAND"
+			menu -m boot -S -n 6	#Select automatic NFS (test) option for next boot
+			ok="1"
+		### Otherwise boot from NAND	
+	    else
+			menu -m boot -S -n 1
+			ok="1"
+		fi
 	fi
 fi
 
@@ -104,19 +111,11 @@ fi
 if [ x$run = x1 -a x$mode = xnand ]; then
 	echo "booting from NAND"
 	run="0"
-	
-	### If barebox is not already set in NAND (first boot or NAND formatted)
-	if [ -f /env/this_is_compiled_in ]; then
-		echo "You might save & edit the config to run from NAND"
-		menu -m boot -S -n 6	#Select automatic NFS (test) option for next boot
-		ok="1"
-    else
-		cp /dev/nand0.kernel /dev/mem.kernel
-		bootargs="$bootargs root=1f01 rootfstype=jffs2 mem=32m init=/init"
-		bootz /dev/mem.kernel
-		menu -m boot -S -n $autoboot_altmode #Select the alternative boot
-	fi
-    
+		
+	cp /dev/nand0.kernel /dev/mem.kernel
+	bootargs="$bootargs root=1f01 rootfstype=jffs2 mem=32m init=/init"
+	bootz /dev/mem.kernel
+	menu -m boot -S -n $autoboot_altmode #Select the alternative boot
 fi
 
 ### Edit and save config mode
