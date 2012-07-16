@@ -19,7 +19,7 @@ autoboot_timeout="10";
 autoboot_altforced="0";
 autoboot_altmode="2";
 error_timeout="60";
-
+net="0"
 bootargs="console=ttyS0,115200"
 
 ### Override default value using /env/config
@@ -49,24 +49,23 @@ menu -r -m boot
 menu -a -m boot -d "Welcome on WRSv3 Boot Sequence"
 menu -e -a -m boot -c 'init -m nand'						-d "boot from nand (default)"
 menu -e -a -m boot -c 'init -m df'							-d "boot from dataflash (failsafe)"
-menu -e -a -m boot -c 'init -m script -i dhcp'				-d "boot from script"
-menu -e -a -m boot -c 'init -m ram -r tftp -i dhcp'			-d "boot from ram"
-menu -e -a -m boot -c 'init -m tftp -r nfs -i dhcp'			-d "boot from nfs"
-menu -e -a -m boot -c 'init -m tftp -r nfs -i dhcp -x test'	-d "boot from nfs (test)"
+menu -e -a -m boot -c 'init -m script -n'					-d "boot from script"
+menu -e -a -m boot -c 'init -m ram -r tftp -n'				-d "boot from ram"
+menu -e -a -m boot -c 'init -m tftp -r nfs -n'				-d "boot from nfs"
+menu -e -a -m boot -c 'init -m tftp -r nfs -n -x test'		-d "boot from nfs (test)"
 menu -e -a -m boot -c 'init -m config'						-d "edit & save config"
 menu -e -a -m boot -c 'exit 0'								-d "shell (prompt terminal)"
 menu -e -a -m boot -c reset									-d "reset barebox"
 
 ### Check init arguments
-while getopt "m:r:i:x:
-" Option
+while getopt "m:r:x:n" Option
 do
 if [ ${Option} = m ]; then
 	mode=${OPTARG}
 elif [ ${Option} = r ]; then
 	rootfs_loc=${OPTARG}
-elif [ ${Option} = i ]; then
-	ip=${OPTARG}
+elif [ ${Option} = n ]; then
+	net="1"
 elif [ ${Option} = x ]; then
 	xtra="-${OPTARG}"
 else
@@ -161,14 +160,14 @@ fi
 
 
 ### Obtain DHCP
-if [ x$run = x1 -a x$ip = xdhcp ]; then
+if [ x$run = x1 -a x$net = x1 -a x$ip = xdhcp ]; then
 	dhcp 5
 	if [ "$?" -eq "1" ]; then
-			echo "Enable to obtain IP from DHCP"
-			echo -n "hit any key to go to menu..."; timeout -sa $error_timeout
-			menu -m boot -s
-			exit 0;
+			echo "Enable to obtain IP from DHCP (Required for $mode)"
+			run="0"
+			ok="0"
 	fi
+	
 fi
 
 ### Try autoboot from loading script  
